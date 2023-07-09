@@ -1,0 +1,1256 @@
+/*Chương trình chiếu sáng Blinn-Phong (Phong sua doi) cho hình lập phương đơn vị, điều khiển quay bằng phím x, y, z, X, Y, Z.*/
+
+#include "Angel.h"  /* Angel.h là file tự phát triển (tác giả Prof. Angel), có chứa cả khai báo includes glew và freeglut*/
+
+// remember to prototype
+void generateGeometry(void);
+void initGPUBuffers(void);
+void shaderSetup(void);
+void display(void);
+void keyboard(unsigned char key, int x, int y);
+
+typedef vec4 point4;
+typedef vec4 color4;
+using namespace std;
+
+// Số các đỉnh của các hình
+const int NumPoints = 36;
+
+point4 points[NumPoints]; /* Danh sách các đỉnh của các tam giác cần vẽ*/
+color4 colors[NumPoints]; /* Danh sách các màu tương ứng cho các đỉnh trên*/
+vec3 normals[NumPoints]; /*Danh sách các vector pháp tuyến ứng với mỗi đỉnh*/
+point4 vertices[8]; /* Danh sách 8 đỉnh của hình lập phương*/
+color4 vertex_colors[8]; /*Danh sách các màu tương ứng cho 8 đỉnh hình lập phương*/
+
+GLuint program;
+
+GLfloat dr = 5;
+mat4 model;
+mat4 instance;
+GLuint model_loc;
+mat4 projection;
+GLuint projection_loc;
+mat4 view;
+GLuint view_loc;
+
+
+/* Khởi tạo các tham số chiếu sáng - tô bóng*/
+point4 light_position(1.0, 0.0, 2.0, 0.0);
+color4 light_ambient(0.2, 0.2, 0.2, 1.0);
+color4 light_diffuse(1.0, 1.0, 1.0, 1.0);
+color4 light_specular(1.0, 1.0, 1.0, 1.0);
+
+color4 material_ambient(1.0, 0.0, 1.0, 1.0);
+color4 material_diffuse(1.0, 0.8, 0.0, 1.0);
+color4 material_specular(1.0, 0.8, 0.0, 1.0);
+float material_shininess = 100.0;
+
+color4 ambient_product = light_ambient * material_ambient; //nguồn sáng môi trường
+color4 diffuse_product = light_diffuse * material_diffuse; // ánh sáng khuếch tán
+color4 specular_product = light_specular * material_specular; // ánh sáng phản chiếu/chói
+
+mat4 keo, gap1, dcghe, dcquat, dccanh, dccanh1, dccanh2, xoay, quaycanh, quatcay, dctivi, quayquat, kimdongho, quattran;
+GLfloat keoy, quaycanhquat, quaycanhquat1 = 0, quaykimdongho, dichchuyentivi;
+GLfloat dcc[] = { 0,0 };
+GLfloat dcc1[] = { 0,0 };
+GLfloat dcg[] = { 0, 0 };
+GLfloat dcq[] = { 0, 0 };
+GLfloat theta[] = { 0, 0, 0 };
+
+GLint gapx2 = 0;
+
+int countUseClock = 0;
+
+void initCube()
+{
+	// Gán giá trị tọa độ vị trí cho các đỉnh của hình lập phương
+	vertices[0] = point4(-0.5, -0.5, 0.5, 1.0);
+	vertices[1] = point4(-0.5, 0.5, 0.5, 1.0);
+	vertices[2] = point4(0.5, 0.5, 0.5, 1.0);
+	vertices[3] = point4(0.5, -0.5, 0.5, 1.0);
+	vertices[4] = point4(-0.5, -0.5, -0.5, 1.0);
+	vertices[5] = point4(-0.5, 0.5, -0.5, 1.0);
+	vertices[6] = point4(0.5, 0.5, -0.5, 1.0);
+	vertices[7] = point4(0.5, -0.5, -0.5, 1.0);
+
+	// Gán giá trị màu sắc cho các đỉnh của hình lập phương	
+	vertex_colors[0] = color4(0.0, 0.0, 0.0, 1.0); // black
+	vertex_colors[1] = color4(1.0, 0.0, 0.0, 1.0); // red
+	vertex_colors[2] = color4(1.0, 1.0, 0.0, 1.0); // yellow
+	vertex_colors[3] = color4(0.0, 1.0, 0.0, 1.0); // green
+	vertex_colors[4] = color4(0.0, 0.0, 1.0, 1.0); // blue
+	vertex_colors[5] = color4(1.0, 0.0, 1.0, 1.0); // magenta
+	vertex_colors[6] = color4(1.0, 0.5, 0.0, 1.0); // orange
+	vertex_colors[7] = color4(0.0, 1.0, 1.0, 1.0); // cyan
+}
+int Index = 0;
+void quad(int a, int b, int c, int d)  /*Tạo một mặt hình lập phương = 2 tam giác, gán màu cho mỗi đỉnh tương ứng trong mảng colors*/
+{
+	vec4 u = vertices[b] - vertices[a];
+	vec4 v = vertices[c] - vertices[b];
+	vec3 normal = normalize(cross(u, v));
+
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[a]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[b]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[c]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[a]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[c]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[d]; Index++;
+}
+void makeColorCube(void)  /* Sinh ra 12 tam giác: 36 đỉnh, 36 màu*/
+
+{
+	quad(1, 0, 3, 2);
+	quad(2, 3, 7, 6);
+	quad(3, 0, 4, 7);
+	quad(6, 5, 1, 2);
+	quad(4, 5, 6, 7);
+	quad(5, 4, 0, 1);
+}
+void generateGeometry(void)
+{
+	initCube();
+	makeColorCube();
+}
+
+
+void initGPUBuffers(void)
+{
+	// Tạo một VAO - vertex array object
+	GLuint vao;
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	// Tạo và khởi tạo một buffer object
+	GLuint buffer;
+	glGenBuffers(1, &buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(points) + sizeof(colors) + sizeof(normals), NULL, GL_STATIC_DRAW);
+
+	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(points), points);
+	glBufferSubData(GL_ARRAY_BUFFER, sizeof(points), sizeof(colors), colors);
+	glBufferSubData(GL_ARRAY_BUFFER, sizeof(points) + sizeof(colors), sizeof(normals), normals);
+}
+
+void shaderSetup(void)
+{
+	// Nạp các shader và sử dụng chương trình shader
+	program = InitShader("vshader1.glsl", "fshader1.glsl");   // hàm InitShader khai báo trong Angel.h
+	glUseProgram(program);
+
+	// Khởi tạo thuộc tính vị trí đỉnh từ vertex shader
+	GLuint loc_vPosition = glGetAttribLocation(program, "vPosition");
+	glEnableVertexAttribArray(loc_vPosition);
+	glVertexAttribPointer(loc_vPosition, 4, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(0));
+
+	GLuint loc_vColor = glGetAttribLocation(program, "vColor");
+	glEnableVertexAttribArray(loc_vColor);
+	glVertexAttribPointer(loc_vColor, 4, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(sizeof(points)));
+
+	GLuint loc_vNormal = glGetAttribLocation(program, "vNormal");
+	glEnableVertexAttribArray(loc_vNormal);
+	glVertexAttribPointer(loc_vNormal, 3, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(sizeof(points) + sizeof(colors)));
+
+
+	glUniform4fv(glGetUniformLocation(program, "AmbientProduct"), 1, ambient_product);  // Nguồn sáng môi trường
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);  // ánh sáng khuếch tán
+	glUniform4fv(glGetUniformLocation(program, "SpecularProduct"), 1, specular_product); // ánh sáng phản chiếu/chói
+	glUniform4fv(glGetUniformLocation(program, "LightPosition"), 1, light_position); // ánh sáng điểm
+	glUniform1f(glGetUniformLocation(program, "Shininess"), material_shininess);  // độ sắc nét
+
+	model_loc = glGetUniformLocation(program, "Model");
+	projection_loc = glGetUniformLocation(program, "Projection");
+	view_loc = glGetUniformLocation(program, "View");
+
+	glEnable(GL_DEPTH_TEST);
+	glClearColor(0.0, 0.0, 0.0, 0.0);        /* Thiết lập màu trắng là màu xóa màn hình*/
+}
+
+
+GLfloat xmg = 1, ymg = 1.8, zmg = 0.2, xmb = 1.2, ymb = 0.6, zmb = 0.02, xcb = 0.02, ycb = 0.02, zcb = 0.8, xmt = 0.4, ymt = 0.3, zmt = 0.02, xden = 0.05, yden = 0.05, zden = 0.2;
+GLfloat xt = 4.5, yt = 0.02, zt = 3;
+
+// background-----------------------------------
+void tuongsau()
+{
+	instance = Translate(0, -0.01, 0.7) * Scale(xt, yt, zt);
+
+	material_diffuse = vec4(0.1, 0.8, 1, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void tuongtrai1()
+{
+	instance = Translate(4.5 / 2, 1.55, -0.3) * RotateZ(90) * Scale(xt * 0.7, yt, zt / 3);
+
+	material_diffuse = vec4(0.1, 0.8, 1, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void tuongtrai2()
+{
+	instance = Translate(4.5 / 2, 1.55, 1.95) * RotateZ(90) * Scale(xt * 0.7, yt, zt / 3 - 0.5);
+
+	material_diffuse = vec4(0.1, 0.8, 1, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void tuongtrai3()
+{
+	instance = Translate(4.5 / 2, 0.45, 0.95) * RotateZ(90) * Scale(xt / 5, yt, zt / 3 + 0.5);
+
+	material_diffuse = vec4(0.1, 0.8, 1, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void tuongtrai4()
+{
+	instance = Translate(4.5 / 2, 2.67, 0.95) * RotateZ(90) * Scale(xt / 5, yt, zt / 3 + 0.5);
+
+	material_diffuse = vec4(0.1, 0.8, 1, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void ngang()
+{
+	instance = Translate(4.5 / 2, 1.55, 0.95) * RotateZ(90) * Scale(1.3, 0.02, 0.05);
+
+	material_diffuse = vec4(0.0, 0.0, 0, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void doc()
+{
+	instance = Translate(4.5 / 2, 1.55, 0.95) * RotateZ(90) * Scale(0.05, yt, zt / 3 + 0.5);
+
+	material_diffuse = vec4(0.0, 0.0, 0, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void tuongphai()
+{
+	instance = Translate(-4.5 / 2, 1.55, 0.7) * RotateZ(90) * Scale(xt * 0.7, yt, zt);
+
+	material_diffuse = vec4(0.1, 0.8, 1, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void san()
+{
+	instance = Translate(0, 1.55, -0.8) * RotateX(90) * Scale(xt, yt + 0.02, zt + 0.15);
+
+	material_diffuse = vec4(0.6, 0.6, 1, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+
+
+//Giường------------------------------------------------------
+void matGiuong()//mặt giường 
+{
+	instance = Translate(-1.2, 0.6 * 1.5, 0.02 * -20) * Scale(1, 1.8, 0.2);;
+
+	material_diffuse = vec4(0.8, 0.4, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void dauGiuong()//đầu giường 
+{
+	instance = Translate(-1.2 * 1, 0.1, -0.5 * 0.2) * Scale(1, 0.1, 0.5);;
+
+	material_diffuse = vec4(0.8, 0.4, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void goiGiuong()//gối 
+{
+	instance = Translate(-1.2 * 1, 0.3, -0.3) * Scale(0.6, 0.3, 0.1);;
+
+	material_diffuse = vec4(10, 1, 1, 10);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void chanGiuong1()//chân giường 
+{
+	instance = Translate(-1 * 0.8, 1.8 * 0.95, 0.2 * -3) * Scale(0.1, 0.1, 0.4);;
+
+	material_diffuse = vec4(0.6, 0.4, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void chanGiuong2()//chân giường 
+{
+	instance = Translate(-1 * 1.6, 1.8 * 0.95, 0.2 * -3) * Scale(0.1, 0.1, 0.4);;
+
+	material_diffuse = vec4(0.6, 0.4, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void chanGiuong3()//chân giường 
+{
+	instance = Translate(-1 * 1.6, 0.1, 0.2 * -3) * Scale(0.1, 0.1, 0.4);;
+
+	material_diffuse = vec4(0.6, 0.4, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void chanGiuong4()//chân giường 
+{
+	instance = Translate(-0.8 * 1, 0.1, 0.2 * -3) * Scale(0.1, 0.1, 0.4);;
+
+	material_diffuse = vec4(0.6, 0.4, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+
+//Tủ------------------------------------------------------
+//GLfloat xct = 0.6, yct = 0.03, zct = 1.6;
+void ct1() {
+	instance = Translate(0.6 * 1.5 + 0.2, 0.03 * 9, 0) * Scale(0.6, 0.03, 1.6);
+	material_diffuse = vec4(0.5, 0.7, 0.1, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dccanh * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void tc1() {
+	instance = Translate(0.6 * 1.1 + 0.7, 0.03 * 10, 0.1) * Scale(0.6 * 0.1, 0.03 * 1.5, 1.6 * 0.01);
+	material_diffuse = vec4(0.8, 0.2, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dccanh * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void tc2() {
+	instance = Translate(0.6 * 2.9 - 0.3, 0.03 * 10, 0.1) * Scale(0.6 * 0.1, 0.03 * 1.5, 1.6 * 0.01);
+	material_diffuse = vec4(0.8, 0.2, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dccanh1 * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void ct2() {
+	instance = Translate(0.6 * 2.5 + 0.2, 0.03 * 9, 0) * Scale(0.6, 0.03, 1.6);
+	material_diffuse = vec4(0.5, 0.7, 0.1, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dccanh1 * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void ns1() {
+	instance = Translate(1.4, 0.02 * 1 / 4, +0.8 * 0) * Scale(1.2, 0.02, 0.8 * 2);
+	material_diffuse = vec4(0.8, 0.2, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void ns2() {
+	instance = Translate(1.4, 0.02 * 1 / 2 + 0.6 * 1 / 4 - 0.02 * 1 / 2, 0.8 * -0.9) * Scale(1.2, 0.6 * 1 / 2, 0.02);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void nst() {
+	instance = Translate(1.4, 0.02 * 1 / 2 + 0.6 * 1 / 4 - 0.02 * 1 / 2, 0.8 * -0.3) * Scale(1.2, 0.6 * 1 / 2 - 0.05, 0.02);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void nst1() {
+	instance = Translate(1.4, 0.02 * 1 / 2 + 0.6 * 1 / 6 - 0.02 * 1 / 2 + 0.035, 0.8 * 1) * Scale(1.2, 0.6 * 1 / 2, 0.02);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void ns3() {
+	instance = Translate(1.4, 0.02 * 1 / 2 + 0.6 * 1 / 4 - 0.02 * 1 / 2, 0.8 * 1 / 3) * Scale(1.2, 0.6 * 1 / 2 - 0.05, 0.02);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void ns4() {
+	instance = Translate(0.2 + 1.2 * 1.5, 0.6 * 1 / 6 + 0.035, 0.8 * 0) * Scale(0.02 * 2, 0.6 * 1 / 2, 0.8 * 2);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void ns5() {
+	instance = Translate(1.2 * 1 / 2 + 0.2, 0.6 * 1 / 6 + 0.035, 0.8 * 0) * Scale(0.02 * 2, 0.6 * 1 / 2, 0.8 * 2);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// bàn ---------------------------------------------------------
+void mb()
+{
+	instance = Translate(0, ymb * 1 / 2, 0) * Scale(xmb + 0.1, ymb, zmb + 0.1);;
+
+	material_diffuse = vec4(0.5, 0.4, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void cb1() {
+	instance = Translate(xmb * 1 / 2 - xcb * 1 / 2, ymb - ycb * 1 / 2, -zcb * 1 / 2) * Scale(xcb + 0.03, ycb + 0.03, zcb);
+	material_diffuse = vec4(0.5, 0.2, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cb2() {
+	instance = Translate(-xmb * 1 / 2 + xcb * 1 / 2, ymb - ycb * 1 / 2, -zcb * 1 / 2) * Scale(xcb + 0.03, ycb + 0.03, zcb);
+	material_diffuse = vec4(0.5, 0.2, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cb3() {
+	instance = Translate(xmb * 1 / 2 - xcb * 1 / 2, ycb * 1 / 2, -zcb * 1 / 2) * Scale(xcb + 0.03, ycb + 0.03, zcb);
+	material_diffuse = vec4(0.5, 0.2, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cb4() {
+	instance = Translate(-xmb * 1 / 2 + xcb * 1 / 2, ycb * 1 / 2, -zcb * 1 / 2) * Scale(xcb + 0.03, ycb + 0.03, zcb);
+	material_diffuse = vec4(0.5, 0.2, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cb5() {
+	instance = Translate(-xmb * 1 / 2 + xcb * 1 / 2, ymb * 0.5, -zcb * 1 / 4) * Scale(xcb, ymb, xcb);
+	material_diffuse = vec4(0.5, 0.2, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cb6() {
+	instance = Translate(+xmb * 1 / 2 - xcb * 1 / 2, ymb * 0.5, -zcb * 1 / 4) * Scale(xcb, ymb, xcb);
+	material_diffuse = vec4(0, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// ghế ----------------------
+void cg1() {
+	instance = Translate(xmb * 1 / 8, ymb + ycb * 2 + ymb * 0.5 - ycb * 1 / 2, -zcb * 1 / 2 + 0.15) * Scale(xcb, ycb, zcb + 0.3);
+	material_diffuse = vec4(0.5, 0.7, 0.1, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcghe * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cg2() {
+	instance = Translate(-xmb * 1 / 8, ymb + ycb * 2 + ymb * 0.5 - ycb * 1 / 2, -zcb * 1 / 2 + 0.15) * Scale(xcb, ycb, zcb + 0.3);
+	material_diffuse = vec4(0.5, 0.7, 0.1, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcghe * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cg3() {
+	instance = Translate(xmb * 1 / 8, ymb + ycb * 2 + ycb * 1 / 2, -zcb * 1 / 2 - 0.15) * Scale(xcb, ycb, zcb - 0.3);
+	material_diffuse = vec4(0.5, 0.7, 0.1, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcghe * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cg4() {
+	instance = Translate(-xmb * 1 / 8, ymb + ycb * 2 + ycb * 1 / 2, -zcb * 1 / 2 - 0.15) * Scale(xcb, ycb, zcb - 0.3);
+	material_diffuse = vec4(0.5, 0.7, 0.1, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcghe * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void mg() {
+	instance = Translate(0, ymb + ycb * 1.5 + ycb * 1 / 2 + ymb * 0.25, -zcb * 1 / 2 - 0.15 + (zcb - 0.3) * 0.5) * Scale(xmb * 1 / 4, ymb * 0.5, 0.02);
+	material_diffuse = vec4(0.5, 0.7, 0.1, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcghe * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void mg1() {
+	instance = Translate(0, ymb + ycb * 2 + ymb * 0.5 - ycb * 1 / 2, -zcb * 1 / 2 + 0.15 + (zcb + 0.3) * 1 / 2 - (zcb + 0.3) * 1 / 16) * Scale(xmb * 1 / 4, ycb, (zcb + 0.3) * 1 / 8);
+	material_diffuse = vec4(0.5, 0.7, 0.1, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcghe * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+//ve quat
+
+void so0() {
+	instance = Translate(0.8, 1.85, -0.7) * Scale(0.04, 0.03, 0.03);
+	material_diffuse = vec4(1, 0.2, 0.2, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void so1() {
+	instance = Translate(0.88, 1.85, -0.7) * Scale(0.04, 0.03, 0.03);
+	material_diffuse = vec4(0.2, 0.8, 0.5, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void so2() {
+	instance = Translate(0.96, 1.85, -0.7) * Scale(0.04, 0.03, 0.03);
+	material_diffuse = vec4(0.2, 0.8, 0.5, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void so3() {
+	instance = Translate(1.04, 1.85, -0.7) * Scale(0.04, 0.03, 0.03);
+	material_diffuse = vec4(0.2, 0.8, 0.5, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void quat1() {
+	instance = Translate(0.92, 1.95, -0.75) * Scale(0.4, 0.3, 0.05);
+	material_diffuse = vec4(0.3, 0.2, 0.2, 0.6);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void quat2() {
+	instance = Translate(0.9, 1.95, -0.5) * Scale(0.1, 0.1, 0.45);
+	material_diffuse = vec4(0, 0.2, 0.2, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void quat3() {
+	instance = Translate(0.9, 1.95, -0.2) * Scale(0.07, 0.07, 0.3);
+	material_diffuse = vec4(0, 0.2, 0.2, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cuquat() {
+	instance = Translate(0.9, 1.95, -0) * Scale(0.1, 0.1, 0.1);
+	material_diffuse = vec4(0, 0.2, 0.2, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void quat4() {
+	instance = Translate(0.9, 1.85, 0.01) * RotateX(90) * Scale(0.05, 0.05, 0.15);
+	material_diffuse = vec4(0, 0.2, 0.2, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void canhquat1() {
+	instance = Translate(0.9, 1.76, 0) * Scale(0.6, 0.01, 0.05);
+	material_diffuse = vec4(1, 0.3, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * quaycanh * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void canhquat2() {
+	instance = Translate(0.9, 1.76, 0) * RotateY(60) * Scale(0.6, 0.01, 0.05);
+	material_diffuse = vec4(1, 0.3, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * quaycanh * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void canhquat3() {
+	instance = Translate(0.9, 1.76, 0) * RotateY(120) * Scale(0.6, 0.01, 0.05);
+	material_diffuse = vec4(1, 0.3, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * quaycanh * dcquat * quayquat * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+//tivi
+void tivi() {
+	instance = Translate(0, 0.02, 1.4) * Scale(1.55, 0.05, 1);
+
+	material_diffuse = vec4(0, 0.2, 0.2, 1);   // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dctivi * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+// chữ LG
+void l1() {
+	instance = Translate(0.15, 0.03, 1.4) * Scale(0.05, 0.05, 0.2);
+
+	material_diffuse = vec4(3, 0.2, 0.2, 1);   // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dctivi * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void l2() {
+	instance = Translate(0.1, 0.03, 1.3) * Scale(0.152, 0.05, 0.05);
+
+	material_diffuse = vec4(3, 0.2, 0.2, 1);   // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dctivi * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void g1() {
+	instance = Translate(-0.1, 0.03, 1.3) * Scale(0.152, 0.05, 0.05);
+
+	material_diffuse = vec4(3, 0.2, 0.2, 1);   // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dctivi * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void g2() {
+	instance = Translate(-0.1, 0.03, 1.5) * Scale(0.152, 0.05, 0.05);
+
+	material_diffuse = vec4(3, 0.2, 0.2, 1);   // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dctivi * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void g3() {
+	instance = Translate(-0.01, 0.03, 1.4) * Scale(0.05, 0.05, 0.2);
+
+	material_diffuse = vec4(3, 0.2, 0.2, 1);   // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dctivi * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void g4() {
+	instance = Translate(-0.155, 0.03, 1.35) * Scale(0.05, 0.05, 0.1);
+
+	material_diffuse = vec4(3, 0.2, 0.2, 1);   // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dctivi * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+//Tủ đầu giường------------------------------------------------------
+void matsau() {
+	instance = Translate(-1.97, 0.02 * 1 / 4, -0.4) * Scale(0.55, 0.02, 0.4 * 2);
+	material_diffuse = vec4(0.8, 0.2, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void mattrai() {
+	instance = Translate(-1.72, 0.6 * 1 / 6 + 0.035, -0.4) * Scale(0.02 * 2, 0.6 * 1 / 2, 0.4 * 2);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void matphai() {
+	instance = Translate(-2.22, 0.6 * 1 / 6 + 0.035, -0.4) * Scale(0.02 * 2, 0.6 * 1 / 2, 0.4 * 2);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void mattren() {
+	instance = Translate(-1.96, 0.02 * 1 / 2 + 0.6 * 1 / 6 - 0.02 * 1 / 2 + 0.035, 0.0) * Scale(0.54, 0.6 * 1 / 2, 0.02);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void matduoi() {
+	instance = Translate(-1.96, 0.16, -0.77) * Scale(0.54, 0.6 * 1 / 2, 0.02);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void canhtu() {
+	instance = Translate(-1.97, 0.03 * 9, -0.4) * Scale(0.55, 0.02, 0.4 * 2);
+	material_diffuse = vec4(0.5, 0.7, 0.1, 0.1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dccanh2 * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void taycam() {
+	instance = Translate(-1.78, 0.03 * 10, -0.4) * Scale(0.6 * 0.1, 0.03 * 1.5, 1.6 * 0.01);
+	material_diffuse = vec4(0.8, 0.2, 0, 0);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dccanh2 * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+// đèn
+void den1() {
+	instance = Translate(-1.9, 0.2, 0.02) * Scale(0.2, 0.2, 0.02);
+	material_diffuse = vec4(0, 0.2, 0.2, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void den2() {
+	instance = Translate(0, -0.025, 0.2 * 1 / 2) * Translate(-1.9, 0.2, 0.02) * Scale(0.05, 0.05, 0.2);
+	material_diffuse = vec4(0, 0.2, 0.2, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void den3() {
+	instance = Translate(-1.5, 0, 0.2 * 2 / 5) * Scale(0.05 * 1 / 2, 0.05 * 1 / 2, 0.2 * 2 / 3);
+	material_diffuse = vec4(0, 0.2, 0.2, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * gap1 * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void den4() {
+	instance = Translate(0, 0, 0.2 * 1 / 3) * Translate(-1.5, -0.1, 0.2 * 2 / 5) * Scale(0.05, 0.05 * 3 / 2, 0.2 * 1 / 6);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * gap1 * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void den5() {
+	instance = Translate(0, 0.05 * 2, 0) * Translate(0, 0, 0.2 * 1 / 3) * Translate(-1.5, -0.1, 0.2 * 2 / 5) * Scale(0.05 * 2, 0.05 * 5 / 2, 0.2 * 1 / 2);
+	material_diffuse = vec4(1, 1, 0, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * gap1 * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+// đồng hồ
+void dongho(GLfloat a, GLfloat b, GLfloat c, GLfloat y)
+{
+	instance = Translate(a, b, c) * RotateY(y) * Scale(0.35, 0.02, 0.35);
+	material_diffuse = vec4(0.2, 0.2, 0, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+void kimngan() {
+	instance = Translate(1.5, 0.02, 1.8) * Scale(0.02, 0.02, 0.15);
+	material_diffuse = vec4(1, 1, 1, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void kimdai() {
+	instance = Translate(1.5, 0.02, 1.8) * Scale(0.02, 0.02, 0.2);
+	material_diffuse = vec4(1, 1, 1, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * kimdongho * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+// quạt trần
+void cai_truc() {
+	instance = Translate(0, 1.8, 2.15) * Scale(0.1, 0.1, 0.1);
+	material_diffuse = vec4(1, 1, 1, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void cai_truc1() {
+	instance = Translate(0, 1.8, 2) * Scale(0.03, 0.03, 0.3);
+	material_diffuse = vec4(1, 1, 1, 1);  // mau vat
+	diffuse_product = light_diffuse * material_diffuse;
+
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void canhquat(GLfloat a, GLfloat b, GLfloat c, GLfloat y) {
+	instance = Translate(a, b, c) * RotateZ(y) * Scale(0.95, 0.15, 0.02);
+	material_diffuse = vec4(0, 0.8, 0, 0);  // mau vat
+
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * quattran * instance);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);    /*Vẽ các tam giác*/
+}
+
+void hienthiCaiQuat()
+{
+	so0();
+	so1();
+	so2();
+	so3();
+	quat1();
+	quat2();
+	quat3();
+	cuquat();
+	quat4();
+	canhquat1();
+	canhquat2();
+	canhquat3();
+}
+void hienthicaiden()
+{
+	den1();
+	den2();
+	den3();
+	den4();
+	den5();
+}
+void hienthiCaiTu()
+{
+	ct1();
+	ct2();
+	tc1();
+	tc2();
+	ns1();
+	ns2();
+	nst();
+	nst1();
+	ns3();
+	ns4();
+	ns5();
+}
+void hienthiCaiBan()
+{
+	mb();
+	cb1();
+	cb2();
+	cb3();
+	cb4();
+	cb5();
+	cb6();
+}
+void hienthiCaiGiuong()
+{
+	matGiuong();
+	dauGiuong();
+	goiGiuong();
+	chanGiuong1();
+	chanGiuong2();
+	chanGiuong3();
+	chanGiuong4();
+}
+void hienthiCaiGhe()
+{
+	cg3();
+	cg4();
+	mg();
+	cg1();
+	cg2();
+	mg1();
+}
+void hienthiTuong()
+{
+	tuongsau();
+	tuongtrai1();
+	tuongtrai2();
+	tuongtrai3();
+	tuongtrai4();
+	ngang();
+	doc();
+	tuongphai();
+	san();
+}
+void hienthitudaugiuong() {
+	matsau();
+	mattrai();
+	matphai();
+	mattren();
+	matduoi();
+	canhtu();
+	taycam();
+}
+void hienthitivi() {
+	tivi();
+	l1();
+	l2();
+	g1();
+	g2();
+	g3();
+	g4();
+}
+void hienthidongho()
+{
+	for (int i = 0; i < 18; i++)
+	{
+		dongho(1.5, 0, 1.7, (5 * i));
+	}
+	kimngan();
+	kimdai();
+}
+void hienthiquattran() {
+	cai_truc();
+	cai_truc1();
+	quattran = Translate(0, 1.8, 1.6) * RotateZ(theta[1]) * Translate(0, -1.8, -1.6);
+	canhquat(-0.2, 2.2, 1.85, 120);
+	canhquat(-0.2, 1.4, 1.85, -120);
+	canhquat(0.45, 1.8, 1.85, 0);
+}
+
+void display(void)
+{
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	const vec3 viewer_pos(0, 0, 2.0);  /*Trùng với eye của camera*/
+
+	gap1 = Translate(0, 0, zden * 2 / 5) * Translate(0, -0.025, zden * 1 / 2) * Translate(-xmb * 1 / 3, ymb * 2 / 5, zmb) * RotateX(gapx2);
+	quaycanh = Translate(0.925, 1.77, 0) * RotateY(quaycanhquat) * Translate(-0.925, -1.77, 0);
+	dcghe = Translate(dcg[0], dcg[1], 0);
+	dcquat = Translate(dcq[0], dcq[1], 0);
+	dccanh = Translate(0.6 * 1.5 - 0.1, 0.03 * 9, 0) * RotateZ(dcc[0]) * Translate(-(0.6 * 1.5 - 0.1), -(0.03 * 9), 0);
+	dccanh1 = Translate(0.6 * 2.5 + 0.5, 0.03 * 9, 0) * RotateZ(dcc1[0]) * Translate(-(0.6 * 2.5 + 0.5), -(0.03 * 9), 0);
+	dccanh2 = Translate(-2.2, 0.03 * 9, 0.2) * RotateZ(dcc[1]) * Translate(2.2, -(0.03 * 9), -0.2);
+	dctivi = Translate(dichchuyentivi, 0, 0);
+
+	hienthiCaiGiuong();
+
+	hienthiCaiBan();
+
+	hienthiCaiTu();
+
+	hienthiCaiGhe();
+
+	quayquat = Translate(0.915, 1.85, 0.01) * RotateZ(180) * Translate(-0.915, -1.85, -0.01);
+	hienthiCaiQuat();
+
+	hienthicaiden();
+
+	hienthiTuong();
+
+	hienthitudaugiuong();
+
+	hienthitivi();
+
+	kimdongho = Translate(1.5, 0.02, 1.7) * RotateY(quaykimdongho) * Translate(-1.5, -0.02, -1.7);
+	hienthidongho();
+
+	hienthiquattran();
+
+	glutSwapBuffers();
+}
+
+void spinCube() {
+	quaykimdongho -= 0.1;
+	if (quaykimdongho > 360.0) {
+		quaykimdongho -= 360.0;
+	}
+	if (quaycanhquat1 == 1) {
+		quaycanhquat += 3;
+		if (quaycanhquat > 360.0) {
+			quaycanhquat -= 360.0;
+		}
+	}
+	theta[1] += 0.1;
+	if (theta[1] > 360.0) {
+		theta[1] -= 360.0;
+	}
+
+	glutPostRedisplay();
+}
+
+void reshape(int width, int height)
+{
+
+	vec4 eye(0, 3, 2, 1); // vị trí đặt mắt
+	vec4 at(0, -0.5, 0, 1); // vị trí đặt vật
+	vec4 up(0, 1, 0, 1); //tọa độ chỉ ra up-vector của camera.
+
+	view = LookAt(eye, at, up);
+	glUniformMatrix4fv(view_loc, 1, GL_TRUE, view);
+
+	projection = Frustum(1, -1, 1, -1, 1, 4); //left right top button znear zfar
+	glUniformMatrix4fv(projection_loc, 1, GL_TRUE, projection);
+
+	glViewport(0, 0, width, height);
+}
+void keyboard(unsigned char key, int x, int y)
+{
+	// keyboard handler
+	switch (key) {
+	case 033:			// 033 is Escape key octal value
+		exit(1);		// quit program
+		break;
+	case 'x': // quay cả phòng quanh trục x
+		model *= RotateX(dr);
+		glutPostRedisplay();
+		break;
+	case 'X':
+		model *= RotateX(-dr);
+		glutPostRedisplay();
+		break;
+	case 'y': // quay cả phòng quanh  trục y
+		model *= RotateY(dr);
+		glutPostRedisplay();
+		break;
+	case 'Y':
+		model *= RotateY(-dr);
+		glutPostRedisplay();
+		break;
+	case 'z': // quay cả phòng quanh trục z
+		model *= RotateZ(-dr);
+		glutPostRedisplay();
+		break;
+	case 'Z':
+		model *= RotateZ(dr);
+		glutPostRedisplay();
+		break;
+	case 'g': // dịch chuyển ghế trái phải
+		dcg[0] += 0.05;
+		if (dcg[0] >= xmb * 0.5 - xmb * 1 / 8 - xcb * 2) dcg[0] = xmb * 0.5 - xmb * 1 / 8 - xcb * 2;
+		glutPostRedisplay();
+		break;
+	case 'G': // dịch chuyển ghế trái phải
+		dcg[0] -= 0.05;
+		if (dcg[0] <= 0) dcg[0] = 0;
+		glutPostRedisplay();
+		break;
+	case 'v': // dịch chuyển tivi trái phải
+		dichchuyentivi += 0.5;
+		if (dichchuyentivi >= 0.5) dichchuyentivi = 0.5;
+		glutPostRedisplay();
+		break;
+	case 'V':
+		dichchuyentivi -= 0.5;
+		if (dichchuyentivi <= -1.5) dichchuyentivi = -1.5;
+		glutPostRedisplay();
+		break;
+	case 'w': // dịch chuyển ghế ra vào
+		dcg[1] += 0.05;
+		if (dcg[1] >= 0.2) { dcg[1] = 0.2; }
+		glutPostRedisplay();
+		break;
+	case 'W':
+		if (keoy <= dcg[1] + 0.3 && keoy >= 0) {
+			dcg[1] -= 0.02;
+			if (dcg[1] <= -1 * keoy - 0.3) dcg[1] = -1 * keoy - 0.3;
+			glutPostRedisplay();
+		}
+		break;
+	case 'p': // đóng mở cửa tủ
+		dcc[0] += 5;
+		if (dcc[0] + 5 >= 90) dcc[0] = 90;
+		glutPostRedisplay();
+		break;
+	case 'P':
+		dcc[0] -= 5;
+		if (dcc[0] - 5 <= 0) dcc[0] = 0;
+		glutPostRedisplay();
+		break;
+	case 't': // đóng mở cửa tủ
+		dcc1[0] -= 5;
+		if (dcc1[0] - 5 <= -90) dcc1[0] = -90;
+		glutPostRedisplay();
+		break;
+	case 'T':
+		dcc1[0] += 5;
+		if (dcc1[0] + 5 >= 0) dcc1[0] = 0;
+		glutPostRedisplay();
+		break;
+	case 'D': // cụp đèn học
+		gapx2 += 5;
+		if (gapx2 >= 0) gapx2 = 0;
+		glutPostRedisplay();
+		break;
+	case 'd':
+		gapx2 -= 5;
+		if (gapx2 <= -40) gapx2 = -40;
+		glutPostRedisplay();
+		break;
+	case 'c': // mở cửa tủ đầu giường
+		dcc[1] += 5;
+		if (dcc[1] + 5 >= 90) dcc[1] = 90;
+		glutPostRedisplay();
+		break;
+	case 'C': // đóng cửa tủ đầu giường
+		dcc[1] -= 5;
+		if (dcc[1] - 5 <= 0) dcc[1] = 0;
+		glutPostRedisplay();
+		break;
+	case 'q':
+		quaycanhquat1 = 1;
+		glutPostRedisplay();
+		break;
+	case 'Q':
+		quaycanhquat1 = 0;
+		glutPostRedisplay();
+		break;
+	}
+}
+
+int main(int argc, char** argv)
+{
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
+	glutInitWindowSize(640, 640);
+	glutInitWindowPosition(100, 150);
+	glutCreateWindow("A Cube is rotated by keyboard and shaded");
+
+	glewInit();
+
+	generateGeometry();
+	initGPUBuffers();
+	shaderSetup();
+
+	glutDisplayFunc(display);
+	glutKeyboardFunc(keyboard);
+	glutIdleFunc(spinCube);
+	glutReshapeFunc(reshape);
+
+	glutMainLoop();
+	return 0;
+}
