@@ -1,0 +1,1622 @@
+ 
+/*Cahương trình chiếu sáng Blinn-Phong cho hình lập phương đơn vị, điều khiển quay bằng phím x, y, z, X, Y, Z.*/
+
+#include "Angel.h"  /* Angel.h là file tự phát triển (tác giả Prof. Angel), có chứa cả khai báo includes glew và freeglut*/
+
+
+// remember to prototype
+void generateGeometry(void);
+void initGPUBuffers(void);
+void shaderSetup(void);
+void display(void);
+void keyboard(unsigned char key, int x, int y);
+
+typedef vec4 point4;
+typedef vec4 color4;
+using namespace std;
+
+// Số các đỉnh của các tam giác
+const int NumPoints = 36;
+point4 points[NumPoints];
+color4 colors[NumPoints];
+vec3 normals[NumPoints]; /*Danh sách các vector pháp tuyến ứng với mỗi đỉnh*/
+point4 vertices[8];
+color4 vertex_colors[8];
+GLuint program;
+
+mat4 model;
+
+GLuint model_loc;
+mat4 projection;
+GLuint projection_loc;
+GLuint view_loc;
+const float dr = 8.0f * DegreesToRadians;
+
+mat4 model1;
+mat4 instance1;
+mat4 instance;
+mat4 instance2;
+
+
+void initCube()
+{
+	// Gán giá trị tọa độ vị trí cho các đỉnh của hình lập phương
+	vertices[0] = point4(-0.5, -0.5, 0.5, 1.0);
+	vertices[1] = point4(-0.5, 0.5, 0.5, 1.0);
+	vertices[2] = point4(0.5, 0.5, 0.5, 1.0);
+	vertices[3] = point4(0.5, -0.5, 0.5, 1.0);
+	vertices[4] = point4(-0.5, -0.5, -0.5, 1.0);
+	vertices[5] = point4(-0.5, 0.5, -0.5, 1.0);
+	vertices[6] = point4(0.5, 0.5, -0.5, 1.0);
+	vertices[7] = point4(0.5, -0.5, -0.5, 1.0);
+
+	/*Gán giá trị màu sắc cho các đỉnh của hình lập phương	*/
+	vertex_colors[0] = color4(0.0, 0.0, 0.0, 1.0); // black
+	vertex_colors[1] = color4(1.0, 0.0, 0.0, 1.0); // red
+	vertex_colors[2] = color4(1.0, 1.0, 0.0, 1.0); // yellow
+	vertex_colors[3] = color4(0.0, 1.0, 0.0, 1.0); // green
+	vertex_colors[4] = color4(0.0, 0.0, 1.0, 1.0); // blue
+	vertex_colors[5] = color4(1.0, 0.0, 1.0, 1.0); // magenta
+	vertex_colors[6] = color4(1.0, 0.5, 0.0, 1.0); // orange
+	vertex_colors[7] = color4(0.0, 1.0, 1.0, 1.0); // cyan
+}
+int Index = 0;
+void quad(int a, int b, int c, int d)  /*Tạo một mặt hình lập phương = 2 tam giác, gán màu cho mỗi đỉnh tương ứng trong mảng colors*/
+{
+	vec4 u = vertices[b] - vertices[a];
+	vec4 v = vertices[c] - vertices[b];
+	vec3 normal = normalize(cross(u, v));
+
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[a]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[b]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[c]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[a]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[c]; Index++;
+	normals[Index] = normal; colors[Index] = vertex_colors[a]; points[Index] = vertices[d]; Index++;
+}
+void makeColorCube(void)  /* Sinh ra 12 tam giác: 36 đỉnh, 36 màu*/
+{
+	quad(1, 0, 3, 2);
+	quad(2, 3, 7, 6);
+	quad(3, 0, 4, 7);
+	quad(6, 5, 1, 2);
+	quad(4, 5, 6, 7);
+	quad(5, 4, 0, 1);
+}
+void generateGeometry(void)
+{
+	initCube();
+	makeColorCube();
+}
+
+enum { Xaxis = 0, Yaxis = 1, Zaxis = 2, NumAxes = 3 };
+int Axis = Xaxis;
+float Theta[NumAxes] = { 0.0, 0.0, 0.0 };
+//Tham so cho Viewing
+float radius = 2, theta_viewing = 0, phi = 0;
+//Cac tham so cho projection
+float l = -1.0f, r = 1.0f;
+float bottom = -1.0f, top = 1.0f;
+float zNear = 1.0f, zFar = 5.0f;
+mat4	model_view;
+float   theta[] = { 0,0,0 };
+
+void initGPUBuffers(void)
+{
+	// Tạo một VAO - vertex array object
+	GLuint vao;
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	// Tạo và khởi tạo một buffer object
+	GLuint buffer;
+	glGenBuffers(1, &buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(points) + sizeof(colors) + sizeof(normals), NULL, GL_STATIC_DRAW);
+
+	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(points), points);
+	glBufferSubData(GL_ARRAY_BUFFER, sizeof(points), sizeof(colors), colors);
+	glBufferSubData(GL_ARRAY_BUFFER, sizeof(points) + sizeof(colors), sizeof(normals), normals);
+}
+
+/* Khởi tạo các tham số chiếu sáng - tô bóng*/
+point4 light_position(0.0, 3.0, 1.5, 0.0);
+color4 light_ambient(0.2, 0.2, 0.2, 1.0);
+color4 light_diffuse(1.0, 1.0, 1.0, 1.0);
+color4 light_specular(1.0, 1.0, 1.0, 1.0);
+
+color4 material_ambient(1.0, 1.0, 1.0, 1.0);
+color4 material_diffuse(1.0, 0.8, 0.0, 1.0);
+color4 material_specular(1.0, 0.8, 0.0, 1.0);
+float material_shininess = 100.0;
+
+
+color4 ambient_product = light_ambient * material_ambient;
+color4 diffuse_product = light_diffuse * material_diffuse;
+color4 specular_product = light_specular * material_specular;
+void shaderSetup(void)
+{
+	// Nạp các shader và sử dụng chương trình shader
+	program = InitShader("vshader1.glsl", "fshader1.glsl");   // hàm InitShader khai báo trong Angel.h
+	glUseProgram(program);
+
+	// Khởi tạo thuộc tính vị trí đỉnh từ vertex shader
+	GLuint loc_vPosition = glGetAttribLocation(program, "vPosition");
+	glEnableVertexAttribArray(loc_vPosition);
+	glVertexAttribPointer(loc_vPosition, 4, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(0));
+
+	GLuint loc_vColor = glGetAttribLocation(program, "vColor");
+	glEnableVertexAttribArray(loc_vColor);
+	glVertexAttribPointer(loc_vColor, 4, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(sizeof(points)));
+
+	GLuint loc_vNormal = glGetAttribLocation(program, "vNormal");
+	glEnableVertexAttribArray(loc_vNormal);
+	glVertexAttribPointer(loc_vNormal, 3, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(sizeof(points) + sizeof(colors)));
+
+
+	glUniform4fv(glGetUniformLocation(program, "AmbientProduct"), 1, ambient_product);
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+	glUniform4fv(glGetUniformLocation(program, "SpecularProduct"), 1, specular_product);
+	glUniform4fv(glGetUniformLocation(program, "LightPosition"), 1, light_position);
+	glUniform1f(glGetUniformLocation(program, "Shininess"), material_shininess);
+
+
+	model_loc = glGetUniformLocation(program, "Model");
+	projection_loc = glGetUniformLocation(program, "Projection");
+	view_loc = glGetUniformLocation(program, "View");
+
+	glEnable(GL_DEPTH_TEST);
+	glClearColor(1.0, 1.0, 1.0, 1.0);        /* Thiết lập màu trắng là màu xóa màn hình*/
+}
+void Tomau(double x, double y, double z, double t)
+{
+	material_diffuse = vec4(x, y, z, t);
+	diffuse_product = light_diffuse * material_diffuse;
+	glUniform4fv(glGetUniformLocation(program, "DiffuseProduct"), 1, diffuse_product);
+}
+
+
+//=============  Truong  ==============  Start
+//Ve san 
+float a[] = { 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0 ,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0 };
+
+void san(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0.1, 0.6, 0.1, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void cong(GLfloat w, GLfloat h, GLfloat l) 
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0.0, 1.0, 0.0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void santrong(GLfloat w, GLfloat h, GLfloat l) 
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0.7, 0.7, 0.7, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+mat4 instance3;
+//// ve tuong
+void tuong(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance3 = Scale(w, h, l);
+	Tomau(0.6, 0.6, 0.0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance3);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+void dinh(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance3 = Scale(w, h, l);
+	Tomau(0.0, 0.0, 0.0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance3);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+//day1
+
+void tuong_phai_cua_1() 
+{
+	for (int i = 0; i < 20; i++)
+	{
+		a[i + 1] = a[i] + 0.2;
+		instance2 = Translate(-3.0f, 0.16f, -1.9f + a[i]);
+		tuong(0.03f, 0.35f, 0.1f);
+	}
+}
+void tuong_phai_cua_2() 
+{
+	for (int i = 0; i < 15; i++)
+	{
+		a[i + 1] = a[i] - 0.2;
+		instance2 = Translate(-3.0f, 0.16f, 1.9f + a[i]);
+		tuong(0.03f, 0.35f, 0.1f);
+	}
+}
+void dinh_phai_cua_1() 
+{
+	for (int i = 0; i < 15; i++)
+	{
+		a[i + 1] = a[i] - 0.2;
+		instance2 = Translate(-3.01f, 0.2f, 1.9f + a[i]);
+		dinh(0.06f, 0.01f, 0.01f);
+	}
+}
+void dinh_phai_cua_2() 
+{
+	for (int i = 0; i < 5; i++)
+	{
+		a[i + 1] = a[i] + 0.2;
+		instance2 = Translate(-3.01f, 0.2f, -1.9f + a[i]);
+		dinh(0.06f, 0.01f, 0.01f);
+	}
+}
+void xa_ngang_phai_cua() 
+{
+	instance2 = Translate(-3.03f, 0.2f, 0.0f);
+	tuong(0.02, 0.1f, 4.0f);
+}
+//day2
+void tuong_doi_dien_cua_1() 
+{
+	for (int i = 0; i < 15; i++)
+	{
+		a[i + 1] = a[i] + 0.2;
+		instance2 = Translate(-2.9f + a[i], 0.16f, 2.0f);
+		tuong(0.1f, 0.35f, 0.03f);
+	}
+}
+void tuong_doi_dien_cua_2() 
+{
+	for (int i = 0; i < 15; i++)
+	{
+		a[i + 1] = a[i] - 0.2;
+		instance2 = Translate(2.9f + a[i], 0.16f, 2.0f);
+		tuong(0.1f, 0.35f, 0.03f);
+	}
+}
+void dinh_doi_dien_cua_1() 
+{
+	for (int i = 0; i < 15; i++)
+	{
+		a[i + 1] = a[i] - 0.2;
+		instance2 = Translate(2.9f + a[i], 0.2f, 2.01f);
+		dinh(0.01f, 0.01f, 0.06f);
+	}
+}
+void dinh_doi_dien_cua_2() 
+{
+	for (int i = 0; i < 15; i++)
+	{
+		a[i + 1] = a[i] + 0.2;
+		instance2 = Translate(-2.9f + a[i], 0.2f, 2.01f);
+		dinh(0.01f, 0.01f, 0.06f);
+	}
+}
+void xa_ngang_doi_dien_cua() 
+{
+	instance2 = Translate(0.0f, 0.2f, 2.03f);
+	tuong(6.0f, 0.1f, 0.02f);
+}
+
+//day3
+void tuong_canh_cua_1() 
+{
+	for (int i = 0; i < 10; i++)
+	{
+		a[i + 1] = a[i] + 0.25;
+		instance2 = Translate(-2.9f + a[i], 0.16f, -2.0f);
+		tuong(0.1f, 0.35f, 0.03f);
+	}
+}
+
+void tuong_canh_cua_2() 
+{
+	for (int i = 0; i < 10; i++)
+	{
+		a[i + 1] = a[i] - 0.25;
+		instance2 = Translate(2.9f + a[i], 0.16f, -2.0f);
+		tuong(0.1f, 0.35f, 0.03f);
+	}
+}
+void xa_ngang_canh_cua() 
+{
+	instance2 = Translate(1.8f, 0.2f, -2.03f);
+	tuong(2.4f, 0.1f, 0.02f);
+}
+void xa_ngang_canh_cua1() 
+{
+	instance2 = Translate(-1.8f, 0.2f, -2.03f);
+	tuong(2.4f, 0.1f, 0.02f);
+}
+void dinh_canh_cua_1() 
+{
+	for (int i = 0; i < 10; i++)
+	{
+		a[i + 1] = a[i] - 0.25;
+		instance2 = Translate(2.9f + a[i], 0.2f, -2.01f);
+		dinh(0.01f, 0.01f, 0.06f);
+	}
+}
+void dinh_canh_cua_2() 
+{
+	for (int i = 0; i < 10; i++)
+	{
+		a[i + 1] = a[i] + 0.25;
+		instance2 = Translate(-2.9f + a[i], 0.2f, -2.01f);
+		dinh(0.01f, 0.01f, 0.06f);
+	}
+}
+//day4
+void tuong_trai_cua_1() 
+{
+	for (int i = 0; i < 10; i++)
+	{
+		a[i + 1] = a[i] + 0.2;
+		instance2 = Translate(3.0f, 0.16f, -1.9f + a[i]);
+		tuong(0.03f, 0.35f, 0.1f);
+	}
+}
+void tuong_trai_cua_2() 
+{
+	for (int i = 0; i < 10; i++)
+	{
+		a[i + 1] = a[i] - 0.2;
+		instance2 = Translate(3.0f, 0.16f, 1.9f + a[i]);
+		tuong(0.03f, 0.35f, 0.1f);
+	}
+}
+
+void dinh_trai_cua_1() {
+	for (int i = 0; i < 15; i++)
+	{
+		a[i + 1] = a[i] - 0.2;
+		instance2 = Translate(3.01f, 0.2f, 1.9f + a[i]);
+		dinh(0.06f, 0.01f, 0.01f);
+	}
+}
+void dinh_trai_cua_2() 
+{
+	for (int i = 0; i < 5; i++)
+	{
+		a[i + 1] = a[i] + 0.2;
+		instance2 = Translate(3.01f, 0.2f, -1.9f + a[i]);
+		dinh(0.06f, 0.01f, 0.01f);
+	}
+}
+void xangang_trai_cua() 
+{
+	instance2 = Translate(3.03f, 0.2f, 0.0f);
+	tuong(0.02, 0.1f, 4.0f);
+}
+GLfloat quay = 0;
+
+void cuatrai()
+{
+	instance2 = Translate(0.2f, 0.45f, -2.0f) * Translate(0.2f, 0.0f, 0.0f) * RotateY(quay) * Translate(-0.2f, 0.0f, 0.0f);
+	cong(0.4f, 0.9f, 0.02f);
+}
+
+void cuaphai()
+{
+	instance2 = Translate(-0.2f, 0.45f, -2.0f) * Translate(-0.2f, 0.0f, 0.0f) * RotateY(-quay) * Translate(0.2f, 0.0f, 0.0f);
+	cong(0.4f, 0.9f, 0.02f);
+}
+void trucong1() 
+{
+	instance2 = Translate(0.45f, 0.5f, -2.0f);
+	tuong(0.15f, 1.0f, 0.1f);
+}
+void trucong2() 
+{
+	instance2 = Translate(-0.45f, 0.5f, -2.0f);
+	tuong(0.15f, 1.0f, 0.1f);
+}
+void san1() 
+{
+	instance2 = Translate(1.74f, 0.0f, 1.2f);
+	san(2.6f, 0.04f, 1.7f);
+}
+void san2() 
+{
+	instance2 = Translate(-1.74f, 0.0f, 1.2f);
+	san(2.6f, 0.04f, 1.7f);
+}
+void san3() 
+{
+	instance2 = Translate(-1.74f, 0.0f, -1.2f);
+	san(2.6f, 0.04f, 1.7f);
+}
+void san4() 
+{
+	instance2 = Translate(1.74f, 0.0f, -1.2f);
+	san(2.6f, 0.04f, 1.7f);
+}
+void sandoc() 
+{
+	instance2 = Translate(0.0f, 0.0f, 0.0f);
+	santrong(6.1f, 0.04f, 0.7f);
+}
+void sanngang() 
+{
+	instance2 = Translate(0.0f, 0.0f, 0.0f);
+	santrong(1.0f, 0.04f, 4.1f);
+}
+
+
+void tuong_trai_cua() 
+{
+	tuong_trai_cua_1();
+	tuong_trai_cua_2();
+	xangang_trai_cua();
+	dinh_trai_cua_1();
+	dinh_trai_cua_2();
+}
+void tuong_phai_cua() 
+{
+	tuong_phai_cua_1();
+	tuong_phai_cua_2();
+	dinh_phai_cua_1();
+	dinh_phai_cua_2();
+	xa_ngang_phai_cua();
+}
+void tuong_doi_dien_cua() 
+{
+	tuong_doi_dien_cua_1();
+	tuong_doi_dien_cua_2();
+	dinh_doi_dien_cua_1();
+	dinh_doi_dien_cua_2();
+	xa_ngang_doi_dien_cua();
+}
+void tuong_canh_cua() 
+{
+	tuong_canh_cua_1();
+	tuong_canh_cua_2();
+	dinh_canh_cua_1();
+	dinh_canh_cua_2();
+	xa_ngang_canh_cua();
+	xa_ngang_canh_cua1();
+}
+void cong() 
+{
+	trucong1();
+	trucong2();
+	cuaphai();
+	cuatrai();
+}
+void tuong_khu_vui_choi() 
+{
+	cong();
+	tuong_trai_cua();
+	tuong_phai_cua();
+	tuong_doi_dien_cua();
+	tuong_canh_cua();
+}
+void san_khu_vui_chơi() {
+	san1();
+	san2();
+	san3();
+	san4();
+	sandoc();
+	sanngang();
+}
+//=============  Truong  ==============  End
+
+
+//=============   Huyen  ==============  Start
+
+//Bập bênh
+mat4 modelb;
+void khoihop(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(1.0, 0.5, 0.0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * modelb * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+GLfloat bapbenh = 0;
+void giabapbenh()
+{
+	instance2 = Translate(2.3, 0.1, 1.6) * Scale(0.05f, 0.2f, 0.1f);
+	Tomau(0.5, 0.5, 0.5, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void thanhbapbenh()
+{
+	//Thanh Ngang
+	instance2 = Translate(2.3, 0.21, 1.6);
+	khoihop(1.2f, 0.02f, 0.1f);
+	instance2 = Translate(2.8, 0.21 + 0.01 + 0.05, 1.6);
+	khoihop(0.01f, 0.1f, 0.1f);
+	//Thanh ben trai
+	instance2 = Translate(1.8, 0.21 + 0.01 + 0.05, 1.6);
+	khoihop(0.01f, 0.1f, 0.1f);
+}
+
+void BapBenh()
+{
+	giabapbenh();
+	modelb = Translate(2.3, 0.21, 1.6) * RotateZ(bapbenh) * Translate(-2.3, -0.21, -1.6);
+	thanhbapbenh();
+}
+
+//Xích đu
+mat4 modelx;
+void khoihopxd(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0, 0.5, 0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void khoihopghe(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(1.0, 1.0, 0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * modelx * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void chanXichDu() 
+{
+	//chân trái trước
+	instance2 = Translate(1, 0.8 / 2 - 0.1, 1.8) * RotateZ(-20);
+	khoihopxd(0.05f, 0.6f, 0.05f);
+	//chân phải trước
+	instance2 = Translate(1.17, 0.8 / 2 - 0.1, 1.8) * RotateZ(20);
+	khoihopxd(0.05f, 0.6f, 0.05f);
+	//chân trái sau
+	instance2 = Translate(1, 0.8 / 2 - 0.1, 1.5) * RotateZ(-20);
+	khoihopxd(0.05f, 0.6f, 0.05f);
+	//chân phải sau
+	instance2 = Translate(1.17, 0.8 / 2 - 0.1, 1.5) * RotateZ(20);
+	khoihopxd(0.05f, 0.6f, 0.05f);
+	//thanh ngang
+	instance2 = Translate(1.085, 0.55, 1.65);
+	khoihopxd(0.04f, 0.04f, 0.3f);
+}
+
+void gheXichDu()
+{
+	//Ghế
+	instance2 = Translate(1.085, 0.15, 1.65);
+	khoihopghe(0.1f, 0.02f, 0.2f);
+	//Dây 1
+	instance2 = Translate(1.085, 0.15 + 0.5 * 0.4, 1.65 - 0.5 * 0.2);
+	khoihopghe(0.01f, 0.4f, 0.01f);
+	//Dây 2
+	instance2 = Translate(1.085, 0.15 + 0.5 * 0.4, 1.65 + 0.5 * 0.2);
+	khoihopghe(0.01f, 0.4f, 0.01f);
+}
+
+GLfloat xichdu = 0;
+void XichDu()
+{
+	chanXichDu();
+	modelx = Translate(1.085, 0.5 * 0.4 + 0.15 + 0.5 * 0.4, 1.65 - 0.5 * 0.2) * RotateZ(xichdu)
+		* Translate(-1.085, -0.5 * 0.4 - 0.15 - 0.5 * 0.4, -1.65 + 0.5 * 0.2);
+	gheXichDu();
+}
+
+//Trò SkyDrop
+mat4 modelh;
+void khoihopsky(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(1.0, 1.0, 0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * modelh * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void thanhSkyDrop()
+{
+	instance2 = Translate(2.5, 0.5 * 1.8, 0.8) * Scale(0.2f, 1.8f, 0.2f);
+	Tomau(0.5, 0.5, 0.5, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void gheSky()
+{
+	//Thanh ngang
+	instance2 = Translate(2.5, 0.5 * 0.3 + 0.1, 0.8 + 0.5 * 0.2);
+	khoihopsky(0.8f, 0.3f, 0.02f);
+	//Thanh dưới
+	instance2 = Translate(2.5, 0.1 - 0.5 * 0.02, 0.8 + 0.2 - 0.01);
+	khoihopsky(0.8f, 0.02f, 0.2f);
+	//Thanh chắn 1
+	instance2 = Translate(2.5 - 0.5 * 0.8 + 0.01, 0.5 * 0.3 + 0.1, 0.8 + 0.2);
+	khoihopsky(0.02f, 0.3f - 0.01f, 0.2f - 0.02f);
+	//Thanh chắn 2
+	instance2 = Translate(2.5 - 0.5 * 0.8 + 0.2, 0.5 * 0.3 + 0.1, 0.8 + 0.2);
+	khoihopsky(0.02f, 0.3f - 0.01f, 0.2f - 0.02f);
+	//Thanh chắn 3
+	instance2 = Translate(2.5 - 0.5 * 0.8 + 0.4, 0.5 * 0.3 + 0.1, 0.8 + 0.2);
+	khoihopsky(0.02f, 0.3f - 0.01f, 0.2f - 0.02f);
+	//Thanh chắn 4
+	instance2 = Translate(2.5 - 0.5 * 0.8 + 0.6, 0.5 * 0.3 + 0.1, 0.8 + 0.2);
+	khoihopsky(0.02f, 0.3f - 0.01f, 0.2f - 0.02f);
+	//Thanh chắn 5
+	instance2 = Translate(2.5 - 0.5 * 0.8 + 0.8, 0.5 * 0.3 + 0.1, 0.8 + 0.2);
+	khoihopsky(0.02f, 0.3f - 0.01f, 0.2f - 0.02f);
+}
+
+GLfloat sky = 0;
+void SkyDrop()
+{
+	thanhSkyDrop();
+	modelh = Translate(0, sky, 0);
+	gheSky();
+}
+float test1 = 1;
+float test2 = 1;
+//=============   Huyen  ==============  End
+
+//=============  Linh  ==============  Start
+//10h 26/5
+void khungBeCat(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance3 = Scale(w, h, l);
+	Tomau(1.0, 0.5, 0.0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance3);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+//đế quay
+void khoiDe(float deg) 
+{
+	instance2 = Translate(-1.8, 0.1, -1.2) * RotateY(deg);
+	khungBeCat(0.2f, 0.17f, 1.3f);
+}
+void De() 
+{
+	for (int deg = 0; deg < 360; deg += 1) {
+		khoiDe(deg);
+	}
+}
+//trục quay
+void khoiTruc(float deg) 
+{
+	instance2 = Translate(-1.8, 0.5, -1.2) * RotateY(deg);
+	khungBeCat(0.2f, 0.8f, 0.05f);
+}
+void Truc() 
+{
+	for (int deg = 0; deg < 360; deg += 1) {
+		khoiTruc(deg);
+	}
+}
+//nóc 
+void khoiNoc(float deg) {
+	instance2 = Translate(-1.8, 0.9, -1.2) * RotateY(deg);
+	khungBeCat(0.2f, 0.05f, 1.3f);
+}
+void Noc() {
+	for (int deg = 0; deg < 360; deg += 1) {
+		khoiNoc(deg);
+	}
+}
+
+//hiên
+void khoiHien(int deg) {
+	instance2 = Translate(-1.8, 0.6, -1.2) * RotateY(deg) * Translate(-0.45, 0.2, -0.45);
+	khungBeCat(0.02f, 0.15f, 0.01f);
+}
+void Hien() {
+	for (int deg = 0; deg < 360; deg += 1) {
+		khoiHien(deg);
+	}
+}
+
+mat4 modelQuayNgua;
+float quayNgua;
+void khungNgua(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance3 = Scale(w, h, l);
+	Tomau(1.0, 0.6, 1.0, 0.1);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * modelQuayNgua * instance2 * instance3);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+//ngựa
+void thanNgua() {
+	instance2 = Translate(0, 0, 0);
+	khungNgua(0.3f, 0.17f, 0.2f);
+}
+void chanNgua() {
+	instance2 = Translate(0.1, -0.1, 0.08);
+	khungNgua(0.03f, 0.08f, 0.03f);
+
+	instance2 = Translate(0.1, -0.1, 0.08 - 0.18);
+	khungNgua(0.03f, 0.08f, 0.03f);
+
+	instance2 = Translate(0.1 - 0.24, -0.1, 0.08);
+	khungNgua(0.03f, 0.08f, 0.03f);
+
+	instance2 = Translate(0.1 - 0.24, -0.1, 0.08 - 0.18);
+	khungNgua(0.03f, 0.08f, 0.03f);
+}
+void dauNgua() {
+	instance2 = Translate(0.2, 0.1, 0);
+	khungNgua(0.12f, 0.08f, 0.1f);
+}
+void trucNgua() {
+	instance2 = Translate(0.1, 0.3, 0);
+	khungNgua(0.03f, 0.45f, 0.03f);
+}
+void conNgua(float deg) {
+	modelQuayNgua = Translate(-1.8, 0.4, -1.8) *
+		Translate(0.0, 0.0, 0.6) *
+		RotateY(deg) *
+		RotateY(quayNgua) *
+		Translate(0.0, 0.0, -0.6);
+	thanNgua();
+	chanNgua();
+	dauNgua();
+	trucNgua();
+}
+void Nguas() {
+	for (int deg = 0; deg < 360; deg += 360 / 5) {
+		conNgua(deg);
+	}
+}
+void VongQuayNgua() {
+	De();
+	Truc();
+	Noc();
+	Hien();
+	Nguas();
+}
+//=============   Linh  ==============  End
+
+
+//=============  Thanh  ==============  Start
+//Cầu trượt
+void Khoithanhngang(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0.8, 0.2, 0.0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void Khoi2(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(1.0, 1.0, 0.0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void Khoi3(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0.6, 0.7, 0.8, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+void Thang()
+{
+	//Chan trai
+	instance2 = Translate(-2.5f, 0.3f, 1.2f);
+	Khoithanhngang(0.2f, 0.6f, 0.05f);
+	//Chan phai
+	instance2 = Translate(-2.5f, 0.3f, 0.9f);
+	Khoithanhngang(0.2f, 0.6f, 0.05f);
+	// thanh ngang 1
+	instance2 = Translate(-2.52f, 0.1f, 1.05f);
+	Khoithanhngang(0.05f, 0.01f, 0.3f);
+	// thanh ngang 2
+	instance2 = Translate(-2.52f, 0.2f, 1.05f);
+	Khoithanhngang(0.05f, 0.01f, 0.3f);
+	// thanh ngang 3
+	instance2 = Translate(-2.52f, 0.3f, 1.05f);
+	Khoithanhngang(0.05f, 0.01f, 0.3f);
+	// thanh ngang 4
+	instance2 = Translate(-2.52f, 0.4f, 1.05f);
+	Khoithanhngang(0.05f, 0.01f, 0.3f);
+	// thanh ngang 5
+	instance2 = Translate(-2.52f, 0.5f, 1.05f);
+	Khoithanhngang(0.05f, 0.01f, 0.3f);
+	//thanh ngang 6
+	instance2 = Translate(-2.5f, 0.6f, 1.05f);
+	Khoithanhngang(0.2f, 0.03f, 0.35f);
+	Tomau(1.0, 0.0, 0.0, 1.0);
+}
+
+void Thanhngang()
+{
+	// thanh ngang 1
+	instance2 = Translate(-2.34f, 0.4f, 1.05f);
+	Khoi3(0.4f, 0.01f, 0.3);
+	// thanh ngang 2
+	instance2 = Translate(-2.18f, 0.2f, 1.05f);
+	Khoi3(0.8f, 0.01f, 0.3f);
+}
+
+void tamcautruot()
+{
+	//Canh trai
+	instance2 = Translate(-1.9f, 0.3f, 1.2f) * RotateZ(60);
+	Khoi3(0.05f, 1.2f, 0.05f);
+	//Canh phai
+	instance2 = Translate(-1.9f, 0.3f, 0.9f) * RotateZ(60);
+	Khoi3(0.05f, 1.2f, 0.05f);
+	//Tam truot
+	instance2 = Translate(-1.9f, 0.28f, 1.05f) * RotateZ(60);
+	Khoi2(0.02f, 1.2f, 0.35f);
+}
+
+void cautruot()
+{
+	Thang();
+	Thanhngang();
+	tamcautruot();
+}
+
+//ghế đá
+void changhe()
+{
+	//chan 1
+	instance2 = Translate(-2.4f, 0.075f, 1.6f);
+	Khoi3(0.025f, 0.13f, 0.025f);
+	//chan 2
+	instance2 = Translate(-2.2f, 0.075f, 1.6f);
+	Khoi3(0.025f, 0.13f, 0.025f);
+	//chan 3
+	instance2 = Translate(-2.4f, 0.13f, 1.72f);
+	Khoi3(0.025f, 0.25f, 0.025f);
+	//chan 4
+	instance2 = Translate(-2.2f, 0.13f, 1.72f);
+	Khoi3(0.025f, 0.25f, 0.025f);
+}
+
+void matghe()
+{
+	//mat dung
+	instance2 = Translate(-2.3f, 0.205f, 1.72f);
+	Khoi3(0.2f, 0.12f, 0.025f);
+	//mat nam
+	instance2 = Translate(-2.3f, 0.14f, 1.65f) * RotateX(90);
+	Khoi3(0.2f, 0.13f, 0.025f);
+}
+
+void gheda()
+{
+	changhe();
+	matghe();
+}
+//=============   Thanh  ==============  End
+
+
+//=============  Nhat  ==============  Start
+//// VÒNG XOAY------------
+
+void khoichanvongxoay(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0.75, 0.5, 0.05, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// Chân vòng xoay
+void chanVongXoay() {
+	//chan trai truoc
+	instance2 = Translate(1.8, 1.2 /2 - 0.02 , -1.0 ) * RotateZ(-20);
+	khoichanvongxoay(0.15f, 1.2f, 0.1f);
+	//chan phai truoc
+	instance2 = Translate(2.1, 1.2 / 2 - 0.02, -1.0) * RotateZ(20);
+	khoichanvongxoay(0.15f, 1.2f, 0.1f);
+	//chan trai sau
+	instance2 = Translate(1.8, 1.2 / 2 - 0.02, -1.7) * RotateZ(-20);
+	khoichanvongxoay(0.15f, 1.2f, 0.1f);
+	//chan phai sau
+	instance2 = Translate(2.1, 1.2 / 2 - 0.02, -1.7) * RotateZ(20);
+	khoichanvongxoay(0.15f, 1.2f, 0.1f);
+	//thanh ngang
+	instance2 = Translate(1.95, 1.0, -1.3) ;
+	khoichanvongxoay(0.04f, 0.04f, 0.7f);
+}
+
+
+// Ma trận xử lý quay cho vòng xoay
+mat4 modelQuayVongXoay;
+
+// Khối tạo cánh vòng xoay
+void khoi_CanhVongXoay(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0.95, 0.4, 0.38, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * modelQuayVongXoay * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// Cánh trái vòng xoay
+void canhVongXoayTrai(float deg) {
+	//canh 0 do
+	instance2 = Translate(1.95, 1.4, -1.11) *
+		Translate(0, -0.4, 0) *
+		RotateZ(deg) *
+		Translate(0, 0.4, 0);
+	khoi_CanhVongXoay(0.05f, 0.8f, 0.05f);
+}
+
+// Cánh phải vòng xoay
+void canhVongXoayPhai(float deg) {
+	instance2 = Translate(1.95, 1.4, -1.61) *
+		Translate(0, -0.4, 0) *
+		RotateZ(deg) *
+		Translate(0, 0.4, 0);
+	khoi_CanhVongXoay(0.05f, 0.8f, 0.05f);
+}
+
+// Thanh nối trái vòng xoay
+void thanhNoiVongXoayTrai(float deg) {
+	//canh 0 do
+	instance2 = Translate(1.95, 1.78, -1.11) *
+		Translate(0, -0.8, 0) *
+		RotateZ(deg) *
+		Translate(0, 0.8, 0);
+	khoi_CanhVongXoay(0.03f, 0.03f, 0.03f);
+}
+
+// Thanh nối phải vòng xoay
+void thanhNoiVongXoayPhai(float deg) {
+	instance2 = Translate(1.95, 1.78, -1.61) *
+		Translate(0, -0.8, 0) *
+		RotateZ(deg) *
+		Translate(0, 0.8, 0);
+	khoi_CanhVongXoay(0.03f, 0.03f, 0.03f);
+}
+
+//Thanh ngang vòng xoay
+void thangNgangVongXoay(float deg) {
+	instance2 = Translate(1.95, 1.78, -1.35) *
+		Translate(0, -0.8, 0) *
+		RotateZ(deg) *
+		Translate(0, 0.8, 0);
+	khoi_CanhVongXoay(0.04f, 0.04f, 0.5f);
+}
+
+mat4 quayCanBangLongVongXoay;
+// Khối tạo lồng vòng xoay
+void khoi_LongVongXoay(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0.2, 0.8, 1, 1);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * modelQuayVongXoay *
+		instance2 * quayCanBangLongVongXoay * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+
+// Lồng vòng xoay
+void longVongXoay(float deg) {
+	instance2 = Translate(1.95, 1.78, -1.35) *
+		Translate(0, -0.8, 0) *
+		RotateZ(deg) *
+		Translate(0, 0.8, 0);
+	khoi_LongVongXoay(0.25f, 0.25f, 0.25f);
+}
+
+// Khởi tạo các biến xoay auto
+float vongXoayTheta = 0;
+float percentTheta = 20;
+float power = 0.03;
+float turnOf = 0;
+
+// Ham xu ly quay auto
+void quayVongXoayAuto(void)
+{
+	if (turnOf == 0) {
+
+		vongXoayTheta = vongXoayTheta + percentTheta * power;
+		if (vongXoayTheta >= 360) {
+			vongXoayTheta = 0;
+		}
+	}
+
+	glutPostRedisplay();
+}
+
+float quayVongXoay;
+
+// Bộ cánh vòng xoay
+void boCanhVongXoay() {
+
+	// Xử lý quay
+	modelQuayVongXoay = Translate(1.95, 1.0, -1.11) *
+		RotateZ(vongXoayTheta) *
+		RotateZ(quayVongXoay) *
+		Translate(-1.95, -1.0, 1.11);
+
+	//Số lồng quay
+	int soLongQuay = 4;
+
+	// Vẽ vòng quay
+	quayCanBangLongVongXoay = RotateZ(-vongXoayTheta);
+	for (int deg = 0; deg < 360; deg += 360 / soLongQuay) {
+		canhVongXoayTrai(deg);
+		canhVongXoayPhai(deg);
+		thangNgangVongXoay(deg);
+		longVongXoay(deg);
+	}
+	quayCanBangLongVongXoay = RotateZ(-vongXoayTheta + 360 / soLongQuay / 2);
+	for (int deg = 360 / soLongQuay / 2; deg < 360; deg += 360 / soLongQuay) {
+		canhVongXoayTrai(deg);
+		canhVongXoayPhai(deg);
+		thangNgangVongXoay(deg);
+		longVongXoay(deg);
+	}
+
+	for (int degn = 0; degn < 360; degn += 2) {
+		thanhNoiVongXoayTrai(degn);
+		thanhNoiVongXoayPhai(degn);
+	}
+
+}
+
+void vongXoay() {
+	chanVongXoay();
+	boCanhVongXoay();
+}
+
+// --------GHẾ ĐÁ------------
+
+mat4 dichGheDa;
+void khoi_gheDa(GLfloat w, GLfloat h, GLfloat l)
+{
+	instance1 = Scale(w, h, l);
+	Tomau(0.6, 0.7, 0.8, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichGheDa * instance2 * instance1);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// Ghế đá gốc
+void gheDaGoc() {
+	//mặt ghế
+	instance2 = Translate(0, 0, 0);
+	khoi_gheDa(0.2f, 0.03f, 0.35f);
+	// chân ghế 1
+	instance2 = Translate(0.06, -0.075, 0.11);
+	khoi_gheDa(0.03f, 0.15f, 0.03f);
+	// chân ghế 2
+	instance2 = Translate(0.06, -0.075, -0.11);
+	khoi_gheDa(0.03f, 0.15f, 0.03f);
+	// chân ghế 3
+	instance2 = Translate(-0.05, -0.075, 0.11);
+	khoi_gheDa(0.03f, 0.15f, 0.03f);
+	// chân ghế 4
+	instance2 = Translate(-0.05, -0.075, -0.11);
+	khoi_gheDa(0.03f, 0.15f, 0.03f);
+	// trục 1
+	instance2 = Translate(0.1, 0.09, 0.08) * RotateZ(-10);
+	khoi_gheDa(0.02f, 0.18f, 0.02f);
+	// trục 2
+	instance2 = Translate(0.1, 0.09, -0.08) * RotateZ(-10);
+	khoi_gheDa(0.02f, 0.18f, 0.02f);
+	// tựa
+	instance2 = Translate(0.1, 0.16, 0) * RotateZ(-10);
+	khoi_gheDa(0.03f, 0.16f, 0.35f);
+}
+
+void gheDa() {
+	// Ghế đá 1
+	dichGheDa = Translate(2.8, 0.15, -0.6);
+	gheDaGoc();
+	// Ghế đá 2
+	dichGheDa = Translate(0.73, 0.15, -1.8) * RotateY(90);
+	gheDaGoc();
+	// Ghế đá 3
+	dichGheDa = Translate(-0.73, 0.15, -1.8) * RotateY(90);
+	gheDaGoc();
+	// Ghế đá 4
+	dichGheDa = Translate(0.9, 0.15, 0.6) * RotateY(90);
+	gheDaGoc();
+	// Ghế đá 4
+	dichGheDa = Translate(1.4, 0.15, 0.6) * RotateY(90);
+	gheDaGoc();
+	// Ghế đá 5
+	dichGheDa = Translate(-0.8, 0.15, 1.8) * RotateY(-90);
+	gheDaGoc();
+}
+
+//-------------------------Mô hình người, robot -----------------------
+mat4 robot;
+mat4 dichRobot;
+// Ngực
+void Nguc()
+{
+	mat4 ctm = Scale(1.8, 1.0, 1.0);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// bụng
+void Bung(GLfloat x, GLfloat y, GLfloat z)
+{
+	mat4 ctm = Translate(x, y, z) * Scale(1.5, 1.0, 0.8);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// Cổ
+void Co(GLfloat x, GLfloat y, GLfloat z)
+{
+	mat4 ctm = Translate(x, y, z) * Scale(0.3, 0.3, 0.3);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// đầu
+void Dau(GLfloat x, GLfloat y, GLfloat z)
+{
+	mat4 ctm = Translate(x, y, z) * Scale(0.8, 0.8, 0.8);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// cánh tay
+mat4 modelDiChuyenTay;
+void CanhTay(GLfloat x, GLfloat y, GLfloat z,
+	GLfloat a, GLfloat b, GLfloat c,
+	GLfloat d, GLfloat e, GLfloat f,
+	GLfloat m, GLfloat n, GLfloat o)
+{
+	mat4 ctm = RotateX(0);
+
+	ctm = ctm * Translate(x, y, z) * Scale(0.8, 0.8, 0.8);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * modelDiChuyenTay * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+
+	ctm = ctm * Translate(a, b, c) * Scale(0.625, 1.0625, 0.625);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * modelDiChuyenTay * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+
+
+	ctm = ctm * Translate(d, e, f) * Scale(1, 1, 1);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * modelDiChuyenTay * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+
+	ctm = ctm * Translate(m, n, o) * Scale(1.4, 0.7, 1.4);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * modelDiChuyenTay * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// chân
+mat4 modelDiChuyenChan;
+void Chan(GLfloat x, GLfloat y, GLfloat z,
+	GLfloat a, GLfloat b, GLfloat c,
+	GLfloat d, GLfloat e, GLfloat f,
+	GLfloat m, GLfloat n, GLfloat o)
+{
+	mat4 ctm = RotateX(0);
+
+	ctm = Translate(x, y, z) * Scale(0.8, 0.8, 0.8);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * modelDiChuyenChan * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+
+	ctm = ctm * Translate(a, b, c) * Scale(0.875, 1.5, 0.875);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * modelDiChuyenChan * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+
+	ctm = ctm * RotateX(0);
+
+	ctm = ctm * Translate(d, e, f) * Scale(1, 1.2, 1);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * modelDiChuyenChan * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+
+	ctm = ctm * Translate(m, n, o) * Scale(8 / 7, 0.5, 1.6);
+	glUniformMatrix4fv(model_loc, 1, GL_TRUE, model * dichRobot * modelDiChuyenChan * robot * ctm);
+	glDrawArrays(GL_TRIANGLES, 0, NumPoints);
+}
+
+// vẽ đầu
+void FullDau()
+{
+	Co(0, 0.65, 0.1);
+	Dau(0, 1.15, 0.3);
+}
+
+float diChuyenChan;
+int daoChan;
+
+// vẽ tay
+void FullTay()
+{
+	modelDiChuyenTay = Translate(0, 0.55, 0) * RotateX(diChuyenChan) * Translate(0, -0.55, 0);
+	CanhTay(1.3, 0, 0, 0, -0.825, 0, 0, -0.85, 0, 0, -0.775, 0);
+	modelDiChuyenTay = Translate(0, 0.55, 0) * RotateX(-diChuyenChan) * Translate(0, -0.55, 0);
+	CanhTay(-1.3, 0, 0, 0, -0.825, 0, 0, -0.85, 0, 0, -0.775, 0);
+}
+
+// vẽ chân
+void FullChan()
+{
+	modelDiChuyenChan = Translate(0, 0.35, 0) * RotateX(diChuyenChan) * Translate(0, -0.35, 0);
+	Chan(-0.415, -1.9, 0, 0, -1.05, 0, 0, -1.1, 0.4, 0, -0.7, 0.1);
+	modelDiChuyenChan = Translate(0, 0.35, 0) * RotateX(-diChuyenChan) * Translate(0, -0.35, 0);
+	Chan(0.415, -1.9, 0, 0, -1.05, 0, 0, -1.1, 0.4, 0, -0.7, 0.1);
+}
+// Khởi tạo các biến robot auto
+float robotTheta = 0;
+float percentRobotTheta = 0.1;
+float powerRobot = 0.005;
+float turnOfRobot = 1;
+int daoChieuDiChuyen = 0;
+float diChuyenRobot;
+
+void Robot()
+{
+	// Chỉnh màu cho robot
+	Tomau(0.98, 0.85, 0.5, 1.0);
+
+	// robot 1
+	dichRobot = Translate(0, 0.29, -0.25) *
+		Translate(diChuyenRobot, 0, 0) *
+		RotateY(daoChieuDiChuyen) * RotateY(90) *
+		Scale(0.25, 0.25, 0.25);
+	robot = Scale(0.2, 0.2, 0.2);
+	Nguc();
+	Bung(0, -1, 0);
+	FullDau();
+	FullTay();
+	FullChan();
+
+
+	// robot 2
+	dichRobot = Translate(0, 0.35, 0.25) *
+		Translate(-diChuyenRobot, 0, 0) *
+		RotateY(daoChieuDiChuyen) * RotateY(-90) *
+		Scale(0.25, 0.25, 0.25);
+	robot = Scale(0.25, 0.25, 0.25);
+	Nguc();
+	Bung(0, -1, 0);
+	FullDau();
+	FullTay();
+	FullChan();
+
+	// robot 3 mẹ
+	dichRobot = Translate(0.35, 0.35, 0) *
+		Translate(0, 0, diChuyenRobot) *
+		RotateY(daoChieuDiChuyen) * RotateY(0) *
+		Scale(0.25, 0.25, 0.25);
+	robot = Scale(0.25, 0.25, 0.25);
+	Nguc();
+	Bung(0, -1, 0);
+	FullDau();
+	FullTay();
+	FullChan();
+
+	// robot 3 con
+	dichRobot = Translate(0.15, 0.23, 0.1) *
+		Translate(0, 0, diChuyenRobot) *
+		RotateY(daoChieuDiChuyen) * RotateY(0) *
+		Scale(0.25, 0.25, 0.25);
+	robot = Scale(0.15, 0.15, 0.15);
+	Nguc();
+	Bung(0, -1, 0);
+	FullDau();
+	FullTay();
+	FullChan();
+}
+
+
+// Ham xu ly Robot di bộ
+void robotDiBo(void)
+{
+	if (turnOfRobot == 1) {
+		// Biến di chuyển nhanh chậm
+		if (percentRobotTheta < 1.3)
+			percentRobotTheta += 0.1;
+		// Biến đổi chiều chuyển động 
+		if (daoChieuDiChuyen == 0) {
+			diChuyenRobot += powerRobot * percentRobotTheta;
+			if (diChuyenRobot > 1.8)  daoChieuDiChuyen = 180;
+		}
+		if (daoChieuDiChuyen == 180) {
+			diChuyenRobot -= powerRobot * percentRobotTheta;
+			if (diChuyenRobot < -1.8)  daoChieuDiChuyen = 0;
+		}
+		// Biến đổi di chuyển tay, chân( đánh tay, chân )
+		if (daoChan == 0) {
+			diChuyenChan += 1.5;
+			if (diChuyenChan > 8)  daoChan = 1;
+		}
+		if (daoChan == 1) {
+			diChuyenChan -= 1.5;
+			if (diChuyenChan < -8)  daoChan = 0;
+		}
+	}
+	glutPostRedisplay();
+}
+
+// Xử lý chuyển động auto
+void xuLyAuto(void) {
+	robotDiBo();
+	quayVongXoayAuto();
+}
+
+
+
+
+
+
+
+//=============   Nhat  ==============  End
+
+void khuvuichoi()
+{
+	instance2 = Identity();
+	model1 = model;
+	model1 = model1 * RotateY(Theta[1]);
+	//=============  Truong  ==============
+
+
+	tuong_khu_vui_choi();
+	instance2 = Translate(-0.00f, -0.02f, 0.00f);
+	san_khu_vui_chơi();
+
+
+	//Huyen
+	BapBenh();
+	XichDu();
+	SkyDrop();
+	//Huyen
+	//Thanh
+	cautruot();
+
+	gheda();
+	//Thanh
+
+
+	//Linh
+	VongQuayNgua();
+	//Linh
+
+	//Nhat
+	vongXoay();
+	gheDa();
+	Robot();
+	//Nhat
+
+
+
+}
+
+
+
+
+void display(void)
+{
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	point4 eye(0.0, 0.0, 4.0, 1.0);
+	point4 at(0.0, 0.0, 0.0, 1.0);
+	vec4 up(0.0, 1.0, 0.0, 1.0);
+	mat4 mv = LookAt(eye, at, up);
+	glUniformMatrix4fv(view_loc, 1, GL_TRUE, mv);
+	mat4 p = Frustum(l, r, bottom, top, zNear, zFar);
+
+	glUniformMatrix4fv(projection_loc, 1, GL_TRUE, p);
+
+	model_view = RotateY(theta[1]);
+	model = RotateX(theta[1]) * RotateY(theta[0]);
+	khuvuichoi();
+	glutSwapBuffers();
+}
+
+
+void mouse(int button, int state, int x, int y)
+{
+	if (state == GLUT_DOWN) {
+		switch (button) {
+		case GLUT_MIDDLE_BUTTON: Axis = Yaxis; break;
+		case GLUT_RIGHT_BUTTON: Axis = Zaxis; break;
+		}
+	}
+}
+
+
+void keyboard(unsigned char key, int x, int y)
+{
+	// keyboard handler
+	switch (key) {
+	case 'z': zNear *= 1.1f; zFar *= 1.1f; break;
+	case 'Z': zNear *= 0.9f; zFar *= 0.9f; break;
+	case 033:			// 033 is Escape key octal value
+		exit(1);		// quit program
+		break;
+
+	case 't': // goc nhin tran nha
+		theta[1] = 90;
+		break;
+	case 'a':
+		theta[0] += 5;
+		if (theta[0] > 360) theta[0] -= 360;
+		break;
+	case 'd':
+		theta[0] -= 5;
+		if (theta[0] > 360) theta[0] -= 360;
+		break;
+	case 'w':
+		theta[1] += 5;
+		if (theta[1] > 360) theta[1] -= 360;
+		break;
+	case 's':
+		theta[1] -= 5;
+		if (theta[1] > 360) theta[1] -= 360;
+		break;
+
+	case ' ': // reset values to their defaults
+		l = -1.0;
+		r = 1.0;
+		bottom = -1.0;
+		top = 1.0;
+		zNear = 0.4f;
+		zFar = 3.0;
+		radius = 1.0;
+		theta_viewing = 0.0;
+		phi = 0.0;
+		break;
+
+		//Bập bênh
+	case 'b':
+		bapbenh += 15;
+		if (bapbenh > 15)
+		{
+			bapbenh = -15;
+		}
+		break;
+		//Xích đu
+	case 'x':
+		if (test1 == 1)
+		{
+			xichdu += 5;
+			if (xichdu >= 90)
+			{
+				test1 = 0;
+			}
+		}
+		if (test1 == 0)
+		{
+			xichdu -= 5;
+			if (xichdu <= -90)
+			{
+				test1 = 1;
+			}
+		}
+		break;
+		//Trò SkyDrop
+	case 'h':
+		if (test2 == 1)
+		{
+			sky += 0.1;
+			if (sky >= 1.4)
+			{
+				test2 = 0;
+			}
+		}
+		if (test2 == 0)
+		{
+			sky -= 0.1;
+			if (sky <= 0.2)
+			{
+				test2 = 1;
+			}
+		}
+		break;
+
+		// Phím điều khiển vòng xoay
+	case '1':
+		power = 0.02;
+		break;
+	case '2':
+		power = 0.04;
+		break;
+	case '3':
+		power = 0.06;
+		break;
+	case '0':
+		if (turnOf == 0) {
+			turnOf = 1;
+		}
+		else {
+			turnOf = 0;
+			percentTheta = 20;
+			power = 0.02;
+		}
+		break;
+	case 'v':
+		quayVongXoay += 1;
+		if (quay > 360)    quay -= 360;
+		break;
+	case 'V':
+		quayVongXoay -= 1;
+		if (quay > 360)    quay += 360;
+		break;
+		// Phím điều khiển mô hình người
+	case '4':
+		powerRobot = 0.005;
+		break;
+	case '5':
+		powerRobot = 0.009;
+		break;
+	case '6':
+		powerRobot = 0.013;
+		break;
+	case '7':
+		if (turnOfRobot == 0) {
+			turnOfRobot = 1;
+		}
+		else {
+			turnOfRobot = 0;
+			powerRobot = 0.005;
+		}
+		break;
+
+	case 'C'://DONG cua
+		quay -= 10;
+		if (quay <= 0)    quay = 0;
+
+		break;
+	case 'c'://mo cua
+		quay += 10;
+		if (quay >= 90)    quay = 90;
+		break;
+	case 'n':
+		quayNgua -= 5;
+		/*if (quay <= 0)    quay = 0;*/
+		break;
+
+	}
+	glutPostRedisplay();
+}
+void reshape(int width, int height)
+{
+	glViewport(0, 0, width, height);
+}
+int main(int argc, char** argv)
+{
+	// main function: program starts here
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
+	glutInitWindowSize(640, 640);
+	glutInitWindowPosition(100, 150);
+	glutCreateWindow("Khu vui choi");
+
+	glewInit();
+
+	generateGeometry();
+	initGPUBuffers();
+	shaderSetup();
+	glutIdleFunc(xuLyAuto);
+	glutDisplayFunc(display);
+	glutKeyboardFunc(keyboard);
+	// lap lai ham nay lien tuc
+
+
+	glutReshapeFunc(reshape);
+
+	glutMainLoop();
+	return 0;
+}
+
+
+
+
+
+
+
+
+
